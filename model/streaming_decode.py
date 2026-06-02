@@ -35,10 +35,10 @@ import k2
 import numpy as np
 import torch
 from data.asr_datamodule import ReazonSpeechAsrDataModule
-from decode_stream import DecodeStream
+from .decode_stream import DecodeStream
 from kaldifeat import Fbank, FbankOptions
 from lhotse import CutSet
-from streaming_beam_search import (
+from .streaming_beam_search import (
     fast_beam_search_one_best,
     greedy_search,
     modified_beam_search,

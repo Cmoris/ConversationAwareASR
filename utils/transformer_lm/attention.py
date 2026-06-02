@@ -20,7 +20,7 @@ from typing import List, Optional, Tuple
 import torch
 from torch import Tensor, nn
 
-from icefall.transformer_lm.scaling import (
+from ..transformer_lm.scaling import (
     ActivationBalancer,
     BasicNorm,
     DoubleSwish,
@@ -28,7 +28,7 @@ from icefall.transformer_lm.scaling import (
     ScaledConv2d,
     ScaledLinear,
 )
-from icefall.utils import is_jit_tracing
+from ..utils import is_jit_tracing
 
 
 class RelPositionMultiheadAttention(nn.Module):

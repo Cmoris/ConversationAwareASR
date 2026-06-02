@@ -52,37 +52,37 @@ def make_cutset_blueprints(
 ) -> List[Tuple[str, CutSet]]:
     cut_sets = []
 
-    # # Create test dataset
-    # logging.info("Creating test cuts.")
-    # cut_sets.append(
-    #     (
-    #         "test",
-    #         CutSet.from_manifests(
-    #             recordings=RecordingSet.from_file(
-    #                 manifest_dir / "reazonspeech_recordings_test.jsonl.gz"
-    #             ),
-    #             supervisions=SupervisionSet.from_file(
-    #                 manifest_dir / "reazonspeech_supervisions_test.jsonl.gz"
-    #             ),
-    #         ),
-    #     )
-    # )
+    # Create test dataset
+    logging.info("Creating test cuts.")
+    cut_sets.append(
+        (
+            "test",
+            CutSet.from_manifests(
+                recordings=RecordingSet.from_file(
+                    manifest_dir / "recordings_test.jsonl.gz"
+                ),
+                supervisions=SupervisionSet.from_file(
+                    manifest_dir / "supervisions_test.jsonl.gz"
+                ),
+            ),
+        )
+    )
 
-    # # Create dev dataset
-    # logging.info("Creating dev cuts.")
-    # cut_sets.append(
-    #     (
-    #         "dev",
-    #         CutSet.from_manifests(
-    #             recordings=RecordingSet.from_file(
-    #                 manifest_dir / "reazonspeech_recordings_dev.jsonl.gz"
-    #             ),
-    #             supervisions=SupervisionSet.from_file(
-    #                 manifest_dir / "reazonspeech_supervisions_dev.jsonl.gz"
-    #             ),
-    #         ),
-    #     )
-    # )
+    # Create dev dataset
+    logging.info("Creating dev cuts.")
+    cut_sets.append(
+        (
+            "dev",
+            CutSet.from_manifests(
+                recordings=RecordingSet.from_file(
+                    manifest_dir / "recordings_dev.jsonl.gz"
+                ),
+                supervisions=SupervisionSet.from_file(
+                    manifest_dir / "supervisions_dev.jsonl.gz"
+                ),
+            ),
+        )
+    )
 
     # Create train dataset
     logging.info("Creating train cuts.")
@@ -91,10 +91,10 @@ def make_cutset_blueprints(
             "train",
             CutSet.from_manifests(
                 recordings=RecordingSet.from_file(
-                    manifest_dir / "recordings.jsonl.gz"
+                    manifest_dir / "recordings_train.jsonl.gz"
                 ),
                 supervisions=SupervisionSet.from_file(
-                    manifest_dir / "supervisions.jsonl.gz"
+                    manifest_dir / "supervisions_train.jsonl.gz"
                 ),
             ),
         )

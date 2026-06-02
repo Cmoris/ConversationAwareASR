@@ -106,7 +106,7 @@ import k2
 import torch
 import torch.nn as nn
 from data.asr_datamodule import ReazonSpeechAsrDataModule
-from beam_search import (
+from .beam_search import (
     beam_search,
     fast_beam_search_nbest,
     fast_beam_search_nbest_LG,

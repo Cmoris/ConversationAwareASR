@@ -17,7 +17,7 @@
 from collections import defaultdict
 from typing import List, Optional, Tuple
 
-from icefall.utils import is_module_available
+from .utils import is_module_available
 
 
 class NgramLm:

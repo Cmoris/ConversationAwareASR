@@ -20,7 +20,7 @@ from typing import Tuple
 import torch
 import torch.nn.functional as F
 
-from icefall.utils import add_eos, add_sos, make_pad_mask
+from ..utils import add_eos, add_sos, make_pad_mask
 
 
 class RnnLmModel(torch.nn.Module):

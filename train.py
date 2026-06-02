@@ -69,7 +69,7 @@ from lhotse import load_manifest
 from lhotse.cut import Cut
 from lhotse.dataset.sampling.base import CutSampler
 from lhotse.utils import fix_random_seed
-from model import AsrModel
+from model.model import AsrModel
 from model.optim import Eden, ScaledAdam
 from model.scaling import ScheduledFloat
 from model.subsampling import Conv2dSubsampling
@@ -613,8 +613,7 @@ def get_model(params: AttributeDict) -> nn.Module:
     )
 
     encoder_embed = get_encoder_embed(params)
-    encoder = AutoModel.from_pretrained("reazon-research/japanese-zipformer-base-k2", 
-                                        trust_remote_code=True)
+    encoder = get_encoder_model(params)
 
     if params.use_transducer:
         decoder = get_decoder_model(params)
@@ -1214,7 +1213,7 @@ def run(rank, world_size, args):
 
     reazonspeech_corpus = ReazonSpeechAsrDataModule(args)
     train_cuts = reazonspeech_corpus.train_cuts()
-
+    
     train_cuts = train_cuts.filter(remove_short_and_long_utt)
 
     if params.start_batch > 0 and checkpoints and "sampler" in checkpoints:

@@ -26,7 +26,7 @@ from typing import Tuple
 
 import sentencepiece as spm
 import torch
-from scaling import BiasNorm
+from .scaling import BiasNorm
 from torch import Tensor, nn
 from train import (
     add_model_arguments,

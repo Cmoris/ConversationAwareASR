@@ -19,10 +19,10 @@ import logging
 
 import torch
 
-from icefall.checkpoint import average_checkpoints, load_checkpoint
-from icefall.rnn_lm.model import RnnLmModel
-from icefall.transformer_lm.model import TransformerLM
-from icefall.utils import AttributeDict, str2bool
+from .checkpoint import average_checkpoints, load_checkpoint
+from .rnn_lm.model import RnnLmModel
+from .transformer_lm.model import TransformerLM
+from .utils import AttributeDict, str2bool
 
 
 class LmScorer(torch.nn.Module):

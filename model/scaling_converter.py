@@ -27,7 +27,7 @@ from typing import List
 
 import torch
 import torch.nn as nn
-from scaling import (
+from .scaling import (
     Balancer,
     Dropout3,
     ScaleGrad,
@@ -37,7 +37,7 @@ from scaling import (
     SwooshROnnx,
     Whiten,
 )
-from zipformer import CompactRelPositionalEncoding
+from .zipformer import CompactRelPositionalEncoding
 
 
 # Copied from https://pytorch.org/docs/1.9.0/_modules/torch/nn/modules/module.html#Module.get_submodule  # noqa

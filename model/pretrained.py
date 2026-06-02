@@ -117,7 +117,7 @@ import k2
 import kaldifeat
 import torch
 import torchaudio
-from beam_search import (
+from .beam_search import (
     fast_beam_search_one_best,
     greedy_search_batch,
     modified_beam_search,

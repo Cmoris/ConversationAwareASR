@@ -22,8 +22,8 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from icefall.transformer_lm.attention import RelPositionMultiheadAttention
-from icefall.transformer_lm.scaling import (
+from ..transformer_lm.attention import RelPositionMultiheadAttention
+from ..transformer_lm.scaling import (
     ActivationBalancer,
     BasicNorm,
     DoubleSwish,
@@ -31,7 +31,7 @@ from icefall.transformer_lm.scaling import (
     ScaledConv2d,
     ScaledLinear,
 )
-from icefall.utils import is_jit_tracing, make_pad_mask
+from ..utils import is_jit_tracing, make_pad_mask
 
 
 class Transformer(torch.nn.Module):

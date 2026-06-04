@@ -52,26 +52,53 @@ def make_cutset_blueprints(
 ) -> List[Tuple[str, CutSet]]:
     cut_sets = []
 
-    for part in ["test", "dev", "train"]:
-        logging.info(f"Creating {part} cuts.")
-
-        recordings = RecordingSet.from_file(
-            manifest_dir / f"recordings_{part}.jsonl.gz"
+    # Create test dataset
+    logging.info("Creating test cuts.")
+    cut_sets.append(
+        (
+            "test",
+            CutSet.from_manifests(
+                recordings=RecordingSet.from_file(
+                    manifest_dir / "recordings_test.jsonl.gz"
+                ),
+                supervisions=SupervisionSet.from_file(
+                    manifest_dir / "supervisions_test.jsonl.gz"
+                ),
+            ),
         )
-        supervisions = SupervisionSet.from_file(
-            manifest_dir / f"supervisions_{part}.jsonl.gz"
+    )
+
+    # Create dev dataset
+    logging.info("Creating dev cuts.")
+    cut_sets.append(
+        (
+            "dev",
+            CutSet.from_manifests(
+                recordings=RecordingSet.from_file(
+                    manifest_dir / "recordings_dev.jsonl.gz"
+                ),
+                supervisions=SupervisionSet.from_file(
+                    manifest_dir / "supervisions_dev.jsonl.gz"
+                ),
+            ),
         )
+    )
 
-        cuts = CutSet.from_manifests(
-            recordings=recordings,
-            supervisions=supervisions,
+    # Create train dataset
+    logging.info("Creating train cuts.")
+    cut_sets.append(
+        (
+            "train",
+            CutSet.from_manifests(
+                recordings=RecordingSet.from_file(
+                    manifest_dir / "recordings_train.jsonl.gz"
+                ),
+                supervisions=SupervisionSet.from_file(
+                    manifest_dir / "supervisions_train.jsonl.gz"
+                ),
+            ),
         )
-
-        # 关键：把一整条 recording-level cut 切成 supervision-level cuts
-        cuts = cuts.trim_to_supervisions()
-
-        cut_sets.append((part, cuts))
-
+    )
     return cut_sets
 
 
@@ -86,33 +113,30 @@ def get_args():
 def main():
     args = get_args()
 
-    extractor = Fbank(FbankConfig(num_mel_bins=80))
     num_jobs = min(16, os.cpu_count())
 
     formatter = "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
 
     logging.basicConfig(format=formatter, level=logging.INFO)
 
-    if (args.manifest_dir / ".speech-fbank.done").exists():
+    if (args.manifest_dir / ".speech-wavs.done").exists():
         logging.info(
-            "Previous fbank computed for ReazonSpeech found. "
-            f"Delete {args.manifest_dir / '.reazonspeech-fbank.done'} to allow recomputing fbank."
+            "Previous wavs computed for ReazonSpeech found. "
+            f"Delete {args.manifest_dir / '.reazonspeech-wavs.done'} to allow recomputing wavs."
         )
         return
     else:
         cut_sets = make_cutset_blueprints(args.manifest_dir)
         for part, cut_set in cut_sets:
             logging.info(f"Processing {part}")
-            cut_set = cut_set.compute_and_store_features(
-                extractor=extractor,
+            cut_set = cut_set.save_audios(
                 num_jobs=num_jobs,
-                storage_path=(Path(args.manifest_dir).resolve() / f"feats_{part}").as_posix(),
-                storage_type=LilcomChunkyWriter,
+                storage_path=(Path(args.manifest_dir).resolve() / f"wavs_{part}").as_posix(),
             )
-            cut_set.to_file(args.manifest_dir / f"reazonspeech_cuts_{part}.jsonl.gz")
+            cut_set.to_file(args.manifest_dir / f"reazonspeech_wavs_cuts_{part}.jsonl.gz")
 
         logging.info("All fbank computed for Speech.")
-        (args.manifest_dir / ".speech-fbank.done").touch()
+        (args.manifest_dir / ".speech-wavs.done").touch()
 
 
 if __name__ == "__main__":

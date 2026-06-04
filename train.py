@@ -1,23 +1,3 @@
-#!/usr/bin/env python3
-# Copyright    2021-2023  Xiaomi Corp.        (authors: Fangjun Kuang,
-#                                                       Wei Kang,
-#                                                       Mingshuang Luo,
-#                                                       Zengwei Yao,
-#                                                       Daniel Povey)
-#
-# See ../../../../LICENSE for clarification regarding multiple authors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """
 Usage:
 
@@ -62,14 +42,14 @@ import model.optim
 import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
-from data.asr_datamodule import ReazonSpeechAsrDataModule
+from data.asr_datamodule import ReazonSpeechAsrDataModule, AsrDataModule
 from model.decoder import Decoder
 from model.joiner import Joiner
 from lhotse import load_manifest
 from lhotse.cut import Cut
 from lhotse.dataset.sampling.base import CutSampler
 from lhotse.utils import fix_random_seed
-from model.model import AsrModel
+from model.dual_model import AsrModel
 from model.optim import Eden, ScaledAdam
 from model.scaling import ScheduledFloat
 from model.subsampling import Conv2dSubsampling
@@ -535,6 +515,8 @@ def get_params() -> AttributeDict:
             "subsampling_factor": 4,  # not passed in, this is fixed.
             "warm_step": 2000,
             "env_info": get_env_info(),
+            "feature_grad_mult": 0.1,
+            "feature_enc_layers": [(512,10,5),(512,3,2),(512,3,2),(512,3,2),(512,3,2),(512,2,2),(512,2,2)]
         }
     )
 
@@ -632,6 +614,8 @@ def get_model(params: AttributeDict) -> nn.Module:
         vocab_size=params.vocab_size,
         use_transducer=params.use_transducer,
         use_ctc=params.use_ctc,
+        feature_grad_mult=params.feature_grad_mult,
+        feature_enc_layers=params.feature_enc_layers
     )
     return model
 
@@ -780,11 +764,12 @@ def compute_loss(
     device = model.device if isinstance(model, DDP) else next(model.parameters()).device
     feature = batch["inputs"]
     # at entry, feature is (N, T, C)
-    assert feature.ndim == 3
+    breakpoint()
+    assert feature.ndim == 2
     feature = feature.to(device)
 
     supervisions = batch["supervisions"]
-    feature_lens = supervisions["num_frames"].to(device)
+    feature_lens = supervisions["num_samples"].to(device)
 
     batch_idx_train = params.batch_idx_train
     warm_step = params.warm_step
@@ -792,7 +777,7 @@ def compute_loss(
     texts = batch["supervisions"]["text"]
     y = sp.encode(texts, out_type=int)
     y = k2.RaggedTensor(y)
-
+    
     with torch.set_grad_enabled(is_training):
         losses = model(
             x=feature,
@@ -1211,9 +1196,10 @@ def run(rank, world_size, args):
 
         return True
 
-    reazonspeech_corpus = ReazonSpeechAsrDataModule(args)
+    # reazonspeech_corpus = ReazonSpeechAsrDataModule(args)
+    reazonspeech_corpus = AsrDataModule(args)
     train_cuts = reazonspeech_corpus.train_cuts()
-    
+    breakpoint()
     train_cuts = train_cuts.filter(remove_short_and_long_utt)
 
     if params.start_batch > 0 and checkpoints and "sampler" in checkpoints:

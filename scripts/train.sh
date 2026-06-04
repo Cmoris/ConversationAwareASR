@@ -8,6 +8,8 @@ python ./train.py \
   --exp-dir ./exp \
   --causal 1 \
   --max-duration 1000 \
+  --enable-spec-aug false \
   --lang dataprocessing/bpe \
   --manifest-dir dataprocessing/cuts \
-  --bpe-model dataprocessing/bpe/bpe.model
+  --bpe-model dataprocessing/bpe/bpe.model \
+  --encoder-dim "192,256,448,768,448,192"

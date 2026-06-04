@@ -50,7 +50,7 @@ def save_cuts(wav_files, starts, ends, texts, output_dir):
     for wav, start, end, text in zip(wav_files, starts, ends, texts):
         wav = Path("/ctd/SpeechData/Trainset/Japanese") / wav
         recording = Recording.from_file(str(wav))
-
+        
         supervision = SupervisionSegment(
             id=f"{wav.stem}-{start:.2f}-{end:.2f}",
             recording_id=recording.id,

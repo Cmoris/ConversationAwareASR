@@ -25,7 +25,7 @@ print(audio.shape)
 print(inputs['input_values'].size())
 print(inputs.keys())
 print(model.config)
-print(model)
+# print(model)
 
 for name in dir(model):
     if "length" in name or "len" in name or "mask" in name:

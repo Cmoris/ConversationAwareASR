@@ -1,14 +1,15 @@
 export CUDA_VISIBLE_DEVICES="0,1,2,3"
 
 python ./train.py \
-  --world-size 4 \
+  --world-size 1 \
   --num-epochs 30 \
+  --base-lr 1e-4 \
   --start-epoch 1 \
   --use-fp16 1 \
-  --use-pretrained false \
-  --exp-dir ./exp \
+  --use-pretrained true \
+  --exp-dir ./exp_pretrained \
   --causal 1 \
-  --max-duration 250 \
+  --max-duration 250  \
   --enable-spec-aug false \
   --lang dataprocessing/bpe \
   --manifest-dir dataprocessing/cuts \

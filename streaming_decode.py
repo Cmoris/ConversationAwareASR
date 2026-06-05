@@ -35,10 +35,10 @@ import k2
 import numpy as np
 import torch
 from data.asr_datamodule import ReazonSpeechAsrDataModule
-from .decode_stream import DecodeStream
+from model.decode_stream import DecodeStream
 from kaldifeat import Fbank, FbankOptions
 from lhotse import CutSet
-from .streaming_beam_search import (
+from model.streaming_beam_search import (
     fast_beam_search_one_best,
     greedy_search,
     modified_beam_search,
@@ -376,6 +376,7 @@ def streaming_forward(
     Returns encoder outputs, output lengths, and updated states.
     """
     cached_embed_left_pad = states[-2]
+    breakpoint()
     (x, x_lens, new_cached_embed_left_pad,) = model.encoder_embed.streaming_forward(
         x=features,
         x_lens=feature_lens,
@@ -448,7 +449,7 @@ def decode_one_chunk(
     feature_lens = []
     states = []
     processed_lens = []  # Used in fast-beam-search
-
+    breakpoint()
     for stream in decode_streams:
         feat, feat_len = stream.get_feature_frames(chunk_size * 2)
         features.append(feat)
@@ -592,9 +593,10 @@ def decode_dataset(
 
         samples = torch.from_numpy(audio).squeeze(0)
 
-        fbank = Fbank(opts)
-        feature = fbank(samples.to(device))
-        decode_stream.set_features(feature, tail_pad_len=30)
+        # fbank = Fbank(opts)
+        # feature = fbank(samples.to(device))
+        # decode_stream.set_features(feature, tail_pad_len=30)
+        decode_stream.set_audio(samples)
         decode_stream.ground_truth = cut.supervisions[0].text
         decode_streams.append(decode_stream)
 
@@ -752,7 +754,7 @@ def main():
         device = torch.device("cuda", 0)
 
     logging.info(f"Device: {device}")
-
+    
     sp_token = Tokenizer.load(params.lang, params.lang_type)
 
     # <blk> and <unk> is defined in local/train_bpe_model.py

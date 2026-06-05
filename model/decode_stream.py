@@ -58,6 +58,15 @@ class DecodeStream(object):
         # It contains a 2-D tensors representing the feature frames.
         self.features: torch.Tensor = None
 
+        # It contains a 1-D tensor representing raw waveform samples.
+        self.audio: torch.Tensor = None
+
+        # Number of valid audio samples.
+        self.num_samples: int = 0
+
+        # How many audio samples have been consumed.
+        self.num_processed_samples: int = 0
+
         self.num_frames: int = 0
         # how many frames have been processed. (before subsampling).
         # we only modify this value in `func:get_feature_frames`.
@@ -119,6 +128,71 @@ class DecodeStream(object):
             value=self.LOG_EPS,
         )
         self.num_frames = self.features.size(0)
+
+    def set_audio(
+        self,
+        audio: torch.Tensor,
+        tail_pad_len: int = 0,
+    ) -> None:
+        """
+        Set raw waveform tensor of current utterance.
+
+        Args:
+            audio:
+                A 1-D tensor of shape (num_samples,).
+            tail_pad_len:
+                Number of zero samples padded at the end.
+                This is optional. For raw audio, usually 0 is fine.
+        """
+        assert audio.dim() == 1, audio.shape
+
+        if tail_pad_len > 0:
+            audio = torch.nn.functional.pad(
+                audio,
+                (0, tail_pad_len),
+                mode="constant",
+                value=0.0,
+            )
+
+        self.audio = audio
+        self.num_samples = self.audio.size(0)
+        self.num_processed_samples = 0
+
+        # Reset done flag when a new utterance is set.
+        self._done = False
+
+    def get_audio_samples(
+        self,
+        chunk_size: int,
+    ) -> Tuple[torch.Tensor, int]:
+        """
+        Consume chunk_size samples of raw waveform.
+
+        Args:
+            chunk_size:
+                Number of audio samples to consume.
+
+        Returns:
+            - audio chunk: Tensor of shape (T,)
+            - chunk length before padding
+        """
+        assert self.audio is not None, "Please call set_audio() first."
+
+        ret_length = min(
+            self.num_samples - self.num_processed_samples,
+            chunk_size,
+        )
+
+        ret_audio = self.audio[
+            self.num_processed_samples : self.num_processed_samples + ret_length
+        ]
+
+        self.num_processed_samples += chunk_size
+
+        if self.num_processed_samples >= self.num_samples:
+            self._done = True
+
+        return ret_audio, ret_length
 
     def get_feature_frames(self, chunk_size: int) -> Tuple[torch.Tensor, int]:
         """Consume chunk_size frames of features"""

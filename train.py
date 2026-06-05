@@ -554,6 +554,10 @@ def get_encoder_embed(params: AttributeDict) -> nn.Module:
 def get_encoder_model(params: AttributeDict) -> nn.Module:
     if params.use_pretrained:
         encoder = Zipformer2.from_hf_pretrained()
+        if params.use_pretrained:
+            for p in encoder.parameters():
+                p.requires_grad = False
+            encoder.eval()
     else:
         encoder = Zipformer2(
             output_downsampling_factor=2,

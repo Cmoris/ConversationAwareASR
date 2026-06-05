@@ -358,14 +358,16 @@ class Zipformer2(EncoderInterface):
         # most recent output that has it present.
         x = self._get_full_dim_output(outputs)
         x = self.downsample_output(x)
+        lengths = x_lens
         # class Downsample has this rounding behavior..
-        assert self.output_downsampling_factor == 2, self.output_downsampling_factor
-        if torch.jit.is_scripting() or torch.jit.is_tracing():
-            lengths = (x_lens + 1) // 2
-        else:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+        
+        if self.output_downsampling_factor == 2:
+            if torch.jit.is_scripting() or torch.jit.is_tracing():
                 lengths = (x_lens + 1) // 2
+            else:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    lengths = (x_lens + 1) // 2
 
         return x, lengths
 
@@ -479,14 +481,15 @@ class Zipformer2(EncoderInterface):
         # most recent output that has it present.
         x = self._get_full_dim_output(outputs)
         x = self.downsample_output(x)
+        lengths = x_lens
         # class Downsample has this rounding behavior..
-        assert self.output_downsampling_factor == 2
-        if torch.jit.is_scripting() or torch.jit.is_tracing():
-            lengths = (x_lens + 1) // 2
-        else:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+        if self.output_downsampling_factor == 2:
+            if torch.jit.is_scripting() or torch.jit.is_tracing():
                 lengths = (x_lens + 1) // 2
+            else:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    lengths = (x_lens + 1) // 2
 
         return x, lengths, new_states
 

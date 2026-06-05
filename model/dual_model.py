@@ -309,6 +309,7 @@ class AsrModel(nn.Module):
         if self.use_pretrained:
             with torch.no_grad():
                 encoder_out, encoder_out_lens = self.encoder(x, x_lens, src_key_padding_mask)
+            # encoder_out, encoder_out_lens = self.encoder(x, x_lens, src_key_padding_mask)
         else:
             encoder_out, encoder_out_lens = self.encoder(x, x_lens, src_key_padding_mask)
 
@@ -563,11 +564,10 @@ class AsrModel(nn.Module):
         assert x.size(0) == x_lens.size(0) == y.dim0, (x.shape, x_lens.shape, y.dim0)
 
         device = x.device
-        
         x, x_lens = self.forward_features(x, x_lens)
         x = x.transpose(1, 2)
         x = self.layer_norm(x)
-        
+
         if use_cr_ctc:
             assert self.use_ctc
             if use_spec_aug:
@@ -591,7 +591,6 @@ class AsrModel(nn.Module):
 
         row_splits = y.shape.row_splits(1)
         y_lens = row_splits[1:] - row_splits[:-1]
-
         if self.use_transducer:
             # Compute transducer loss
             simple_loss, pruned_loss = self.forward_transducer(

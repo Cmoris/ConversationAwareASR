@@ -170,6 +170,7 @@ class ConvNeXt(nn.Module):
             cached_left_pad.size(2),
             padding[0],
         )
+        breakpoint()
         x = torch.cat([cached_left_pad, x], dim=2)
         # Update cached left padding
         cached_left_pad = x[:, :, T : padding[0] + T, :]

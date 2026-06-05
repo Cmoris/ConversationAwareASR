@@ -541,6 +541,199 @@ class Zipformer2(EncoderInterface):
                 ]
 
         return states
+    
+    @classmethod
+    def from_hf_pretrained(
+        cls,
+        model_name_or_path: str = "reazon-research/japanese-zipformer-base-k2",
+        strict: bool = True,
+        trust_remote_code: bool = True,
+        map_location: str = "cpu",
+        **override_kwargs,
+    ) -> "Zipformer2":
+        """
+        Create a Zipformer2 instance from a HuggingFace pretrained ZipformerModel.
+
+        This only loads the inner HF `model.encoder` weights, not the waveform
+        frontend or post-extraction projection.
+
+        Args:
+            model_name_or_path:
+                HF model name or local HF checkpoint path.
+            strict:
+                Whether to require exact state_dict match.
+            trust_remote_code:
+                Required for remote HF Zipformer code.
+            map_location:
+                Device for loading HF model.
+            override_kwargs:
+                Manually override config fields when creating Zipformer2.
+
+        Returns:
+            A Zipformer2 instance with HF encoder weights loaded.
+        """
+        from transformers import AutoModel
+
+        hf_model = AutoModel.from_pretrained(
+            model_name_or_path,
+            trust_remote_code=trust_remote_code,
+        )
+        hf_model.to(map_location)
+
+        config = hf_model.config
+
+        init_kwargs = cls._zipformer_kwargs_from_hf_config(config)
+        init_kwargs.update(override_kwargs)
+
+        model = cls(**init_kwargs)
+
+        model.load_hf_pretrained(
+            model_name_or_path=model_name_or_path,
+            strict=strict,
+            trust_remote_code=trust_remote_code,
+            map_location=map_location,
+        )
+
+        return model
+
+    def load_hf_pretrained(
+        self,
+        model_name_or_path: str = "reazon-research/japanese-zipformer-base-k2",
+        strict: bool = True,
+        trust_remote_code: bool = True,
+        map_location: str = "cpu",
+        verbose: bool = True,
+    ):
+        """
+        Load weights from the inner HF Zipformer2 encoder.
+
+        This expects:
+            hf_model.encoder.state_dict()
+        to match:
+            self.state_dict()
+
+        Args:
+            model_name_or_path:
+                HF model name or local path.
+            strict:
+                If True, require exact key and shape match.
+            trust_remote_code:
+                Required for HF remote code model.
+            map_location:
+                Load HF model to this device first.
+            verbose:
+                Print loading diagnostics.
+        """
+        from transformers import AutoModel
+
+        hf_model = AutoModel.from_pretrained(
+            model_name_or_path,
+            trust_remote_code=trust_remote_code,
+        )
+        hf_model.to(map_location)
+
+        if not hasattr(hf_model, "encoder"):
+            raise AttributeError(
+                "The loaded HF model has no attribute `encoder`. "
+                "Please check the HF model structure."
+            )
+
+        hf_encoder_state = hf_model.encoder.state_dict()
+        own_state = self.state_dict()
+
+        matched_state = {}
+        missing_in_hf = []
+        shape_mismatch = []
+        unexpected_in_hf = []
+
+        for key, value in own_state.items():
+            if key not in hf_encoder_state:
+                missing_in_hf.append(key)
+                continue
+
+            hf_value = hf_encoder_state[key]
+            if hf_value.shape != value.shape:
+                shape_mismatch.append(
+                    (key, tuple(value.shape), tuple(hf_value.shape))
+                )
+                continue
+
+            matched_state[key] = hf_value
+
+        for key in hf_encoder_state.keys():
+            if key not in own_state:
+                unexpected_in_hf.append(key)
+
+        if verbose:
+            print(f"[HF Zipformer] matched keys: {len(matched_state)}")
+            print(f"[HF Zipformer] missing in HF: {len(missing_in_hf)}")
+            print(f"[HF Zipformer] unexpected in HF: {len(unexpected_in_hf)}")
+            print(f"[HF Zipformer] shape mismatch: {len(shape_mismatch)}")
+
+            if len(missing_in_hf) > 0:
+                print("\n[Missing in HF] first 20:")
+                for key in missing_in_hf[:20]:
+                    print("  ", key)
+
+            if len(unexpected_in_hf) > 0:
+                print("\n[Unexpected in HF] first 20:")
+                for key in unexpected_in_hf[:20]:
+                    print("  ", key)
+
+            if len(shape_mismatch) > 0:
+                print("\n[Shape mismatch] first 20:")
+                for key, own_shape, hf_shape in shape_mismatch[:20]:
+                    print(f"  {key}: own={own_shape}, hf={hf_shape}")
+
+        if strict:
+            if missing_in_hf or unexpected_in_hf or shape_mismatch:
+                raise RuntimeError(
+                    "HF encoder state_dict does not exactly match this Zipformer2. "
+                    "Set strict=False to load only matched keys, or make sure "
+                    "the model hyperparameters are identical."
+                )
+
+            self.load_state_dict(hf_encoder_state, strict=True)
+        else:
+            own_state.update(matched_state)
+            self.load_state_dict(own_state, strict=False)
+
+        return {
+            "matched": list(matched_state.keys()),
+            "missing_in_hf": missing_in_hf,
+            "unexpected_in_hf": unexpected_in_hf,
+            "shape_mismatch": shape_mismatch,
+        }
+
+    @staticmethod
+    def _zipformer_kwargs_from_hf_config(config) -> dict:
+        """
+        Convert HF ZipformerConfig to local Zipformer2 init kwargs.
+
+        Note:
+            This only creates the inner Zipformer2, not the HF waveform frontend.
+        """
+        return {
+            "output_downsampling_factor": getattr(
+                config, "output_downsampling_factor", 1
+            ),
+            "downsampling_factor": tuple(config.downsampling_factor),
+            "encoder_dim": tuple(config.encoder_dim),
+            "num_encoder_layers": tuple(config.num_encoder_layers),
+            "encoder_unmasked_dim": tuple(config.encoder_unmasked_dim),
+            "query_head_dim": config.query_head_dim,
+            "pos_head_dim": config.pos_head_dim,
+            "value_head_dim": config.value_head_dim,
+            "num_heads": tuple(config.num_heads),
+            "feedforward_dim": tuple(config.feedforward_dim),
+            "cnn_module_kernel": tuple(config.cnn_module_kernel),
+            "pos_dim": config.pos_dim,
+            "dropout": ScheduledFloat((0.0, 0.3), (20000.0, 0.1)),
+            "warmup_batches": 4000.0,
+            "causal": False,
+            "chunk_size": [-1],
+            "left_context_frames": [-1],
+        }
 
 
 def _whitening_schedule(x: float, ratio: float = 2.0) -> ScheduledFloat:

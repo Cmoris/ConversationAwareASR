@@ -19,7 +19,7 @@ inputs = feature_extractor(
     return_tensors="pt",
     sampling_rate=sr,
 )
-# inputs['padding_mask'] = (inputs['input_values'] != 0)
+inputs['padding_mask'] = (inputs['input_values'] != 0)
 
 print(audio.shape)
 print(inputs['input_values'].size())
@@ -27,9 +27,6 @@ print(inputs.keys())
 print(model.config)
 # print(model)
 
-for name in dir(model):
-    if "length" in name or "len" in name or "mask" in name:
-        print(name)
 
 with torch.inference_mode():
     outputs = model(**inputs)

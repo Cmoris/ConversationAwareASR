@@ -240,6 +240,13 @@ def add_model_arguments(parser: argparse.ArgumentParser):
         help="If True, use CTC head.",
     )
 
+    parser.add_argument(
+        "--use-pretrained",
+        type=str2bool,
+        default=True,
+        help="If True, use Pretrained Model from huggingface.",
+    )
+
 
 def get_parser():
     parser = argparse.ArgumentParser(
@@ -511,7 +518,7 @@ def get_params() -> AttributeDict:
             "reset_interval": 200,
             "valid_interval": 3000,  # For the 100h subset, use 800
             # parameters for zipformer
-            "feature_dim": 80,
+            "feature_dim": 512,
             "subsampling_factor": 4,  # not passed in, this is fixed.
             "warm_step": 2000,
             "env_info": get_env_info(),
@@ -545,25 +552,28 @@ def get_encoder_embed(params: AttributeDict) -> nn.Module:
 
 
 def get_encoder_model(params: AttributeDict) -> nn.Module:
-    encoder = Zipformer2(
-        output_downsampling_factor=2,
-        downsampling_factor=_to_int_tuple(params.downsampling_factor),
-        num_encoder_layers=_to_int_tuple(params.num_encoder_layers),
-        encoder_dim=_to_int_tuple(params.encoder_dim),
-        encoder_unmasked_dim=_to_int_tuple(params.encoder_unmasked_dim),
-        query_head_dim=_to_int_tuple(params.query_head_dim),
-        pos_head_dim=_to_int_tuple(params.pos_head_dim),
-        value_head_dim=_to_int_tuple(params.value_head_dim),
-        pos_dim=params.pos_dim,
-        num_heads=_to_int_tuple(params.num_heads),
-        feedforward_dim=_to_int_tuple(params.feedforward_dim),
-        cnn_module_kernel=_to_int_tuple(params.cnn_module_kernel),
-        dropout=ScheduledFloat((0.0, 0.3), (20000.0, 0.1)),
-        warmup_batches=4000.0,
-        causal=params.causal,
-        chunk_size=_to_int_tuple(params.chunk_size),
-        left_context_frames=_to_int_tuple(params.left_context_frames),
-    )
+    if params.use_pretrained:
+        encoder = Zipformer2.from_hf_pretrained()
+    else:
+        encoder = Zipformer2(
+            output_downsampling_factor=2,
+            downsampling_factor=_to_int_tuple(params.downsampling_factor),
+            num_encoder_layers=_to_int_tuple(params.num_encoder_layers),
+            encoder_dim=_to_int_tuple(params.encoder_dim),
+            encoder_unmasked_dim=_to_int_tuple(params.encoder_unmasked_dim),
+            query_head_dim=_to_int_tuple(params.query_head_dim),
+            pos_head_dim=_to_int_tuple(params.pos_head_dim),
+            value_head_dim=_to_int_tuple(params.value_head_dim),
+            pos_dim=params.pos_dim,
+            num_heads=_to_int_tuple(params.num_heads),
+            feedforward_dim=_to_int_tuple(params.feedforward_dim),
+            cnn_module_kernel=_to_int_tuple(params.cnn_module_kernel),
+            dropout=ScheduledFloat((0.0, 0.3), (20000.0, 0.1)),
+            warmup_batches=4000.0,
+            causal=params.causal,
+            chunk_size=_to_int_tuple(params.chunk_size),
+            left_context_frames=_to_int_tuple(params.left_context_frames),
+        )
     return encoder
 
 
@@ -609,11 +619,13 @@ def get_model(params: AttributeDict) -> nn.Module:
         encoder=encoder,
         decoder=decoder,
         joiner=joiner,
+        feature_dim=params.feature_dim,
         encoder_dim=max(_to_int_tuple(params.encoder_dim)),
         decoder_dim=params.decoder_dim,
         vocab_size=params.vocab_size,
         use_transducer=params.use_transducer,
         use_ctc=params.use_ctc,
+        use_pretrained=params.use_pretrained,
         feature_grad_mult=params.feature_grad_mult,
         feature_enc_layers=params.feature_enc_layers
     )
@@ -764,10 +776,10 @@ def compute_loss(
     device = model.device if isinstance(model, DDP) else next(model.parameters()).device
     feature = batch["inputs"]
     # at entry, feature is (N, T, C)
-    breakpoint()
+    
     assert feature.ndim == 2
     feature = feature.to(device)
-
+    
     supervisions = batch["supervisions"]
     feature_lens = supervisions["num_samples"].to(device)
 
@@ -1199,7 +1211,7 @@ def run(rank, world_size, args):
     # reazonspeech_corpus = ReazonSpeechAsrDataModule(args)
     reazonspeech_corpus = AsrDataModule(args)
     train_cuts = reazonspeech_corpus.train_cuts()
-    breakpoint()
+
     train_cuts = train_cuts.filter(remove_short_and_long_utt)
 
     if params.start_batch > 0 and checkpoints and "sampler" in checkpoints:

@@ -48,6 +48,17 @@ class TransposeLast(nn.Module):
         if self.deconstruct_idx is not None:
             x = x[self.deconstruct_idx]
         return x.transpose(self.tranpose_dim, -1)
+    
+class GradMultiply(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, scale):
+        ctx.scale = scale
+        res = x.new(x)
+        return res
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * ctx.scale, None
 
 class ConvFeatureExtractionModel(nn.Module):
     def __init__(
@@ -119,14 +130,37 @@ class ConvFeatureExtractionModel(nn.Module):
             )
             in_d = dim
 
-    def forward(self, x):
+    @staticmethod
+    def _conv_out_length(
+        input_length: torch.Tensor,
+        kernel_size: int,
+        stride: int,
+        padding: int = 0,
+        dilation: int = 1,
+    ) -> torch.Tensor:
+        return torch.div(
+            input_length + 2 * padding - dilation * (kernel_size - 1) - 1,
+            stride,
+            rounding_mode="floor",
+        ) + 1
+
+    def forward(self, x, x_lens):
+        x_lens = x_lens.to(torch.long)
         # BxT -> BxCxT
         x = x.unsqueeze(1)
 
-        for conv in self.conv_layers:
-            x = conv(x)
+        for conv_block in self.conv_layers:
+            conv = conv_block[0]
+            x = conv_block(x)
+            x_lens = self._conv_out_length(
+                x_lens,
+                kernel_size=conv.kernel_size[0],
+                stride=conv.stride[0],
+                padding=conv.padding[0],
+                dilation=conv.dilation[0],
+            )
 
-        return x
+        return x, x_lens
 
 class AsrModel(nn.Module):
     def __init__(
@@ -136,9 +170,11 @@ class AsrModel(nn.Module):
         decoder: Optional[nn.Module] = None,
         joiner: Optional[nn.Module] = None,
         attention_decoder: Optional[nn.Module] = None,
+        feature_dim: int = 512,
         encoder_dim: int = 384,
         decoder_dim: int = 512,
         vocab_size: int = 500,
+        use_pretrained: bool=True,
         use_transducer: bool = True,
         use_ctc: bool = False,
         use_attention_decoder: bool = False,
@@ -187,10 +223,14 @@ class AsrModel(nn.Module):
         assert isinstance(encoder, EncoderInterface), type(encoder)
         self.feature_grad_mult = feature_grad_mult
         self.feature_enc_layers = feature_enc_layers
+        self.embed = feature_enc_layers[-1][0]
+
         self.feature_extractor = ConvFeatureExtractionModel(
             conv_layers=feature_enc_layers,
             dropout=0.0,
         )
+
+        self.layer_norm = nn.LayerNorm(feature_dim)
 
         self.encoder_embed = encoder_embed
         self.encoder = encoder
@@ -230,6 +270,18 @@ class AsrModel(nn.Module):
         else:
             assert attention_decoder is None
 
+        self.use_pretrained = use_pretrained
+
+    def forward_features(self, source: torch.Tensor, x_lens: torch.Tensor) -> torch.Tensor:
+        if self.feature_grad_mult > 0:
+            features, feature_lens = self.feature_extractor(source, x_lens)
+            if self.feature_grad_mult != 1.0:
+                features = GradMultiply.apply(features, self.feature_grad_mult)
+        else:
+            with torch.no_grad():
+                features, feature_lens = self.feature_extractor(source, x_lens)
+        return features, feature_lens
+
     def forward_encoder(
         self, x: torch.Tensor, x_lens: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -254,8 +306,11 @@ class AsrModel(nn.Module):
 
         src_key_padding_mask = make_pad_mask(x_lens)
         x = x.permute(1, 0, 2)  # (N, T, C) -> (T, N, C)
-
-        encoder_out, encoder_out_lens = self.encoder(x, x_lens, src_key_padding_mask)
+        if self.use_pretrained:
+            with torch.no_grad():
+                encoder_out, encoder_out_lens = self.encoder(x, x_lens, src_key_padding_mask)
+        else:
+            encoder_out, encoder_out_lens = self.encoder(x, x_lens, src_key_padding_mask)
 
         encoder_out = encoder_out.permute(1, 0, 2)  # (T, N, C) ->(N, T, C)
         assert torch.all(encoder_out_lens > 0), (x_lens, encoder_out_lens)
@@ -501,14 +556,18 @@ class AsrModel(nn.Module):
               lm_scale * lm_probs + am_scale * am_probs +
               (1-lm_scale-am_scale) * combined_probs
         """
-        assert x.ndim == 3, x.shape
+        assert x.ndim == 2, x.shape
         assert x_lens.ndim == 1, x_lens.shape
         assert y.num_axes == 2, y.num_axes
 
         assert x.size(0) == x_lens.size(0) == y.dim0, (x.shape, x_lens.shape, y.dim0)
 
         device = x.device
-
+        
+        x, x_lens = self.forward_features(x, x_lens)
+        x = x.transpose(1, 2)
+        x = self.layer_norm(x)
+        
         if use_cr_ctc:
             assert self.use_ctc
             if use_spec_aug:

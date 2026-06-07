@@ -163,7 +163,7 @@ class DecodeStream(object):
 
     def get_audio_samples(
         self,
-        chunk_size: int,
+        chunk_samples: int,
     ) -> Tuple[torch.Tensor, int]:
         """
         Consume chunk_size samples of raw waveform.
@@ -180,14 +180,14 @@ class DecodeStream(object):
 
         ret_length = min(
             self.num_samples - self.num_processed_samples,
-            chunk_size,
+            chunk_samples,
         )
 
         ret_audio = self.audio[
             self.num_processed_samples : self.num_processed_samples + ret_length
         ]
 
-        self.num_processed_samples += chunk_size
+        self.num_processed_samples += chunk_samples
 
         if self.num_processed_samples >= self.num_samples:
             self._done = True

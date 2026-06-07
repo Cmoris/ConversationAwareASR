@@ -376,7 +376,7 @@ def streaming_forward(
     Returns encoder outputs, output lengths, and updated states.
     """
     cached_embed_left_pad = states[-2]
-    breakpoint()
+
     (x, x_lens, new_cached_embed_left_pad,) = model.encoder_embed.streaming_forward(
         x=features,
         x_lens=feature_lens,
@@ -445,21 +445,29 @@ def decode_one_chunk(
     chunk_size = int(params.chunk_size)
     left_context_len = int(params.left_context_frames)
 
-    features = []
-    feature_lens = []
+    chunk_sec = float(params.chunk_sec)
+    chunk_samples = int(chunk_sec * params.sample_rate)
+
+    samples = []
+    sample_lens = []
     states = []
     processed_lens = []  # Used in fast-beam-search
-    breakpoint()
+    
     for stream in decode_streams:
-        feat, feat_len = stream.get_feature_frames(chunk_size * 2)
-        features.append(feat)
-        feature_lens.append(feat_len)
+        samp, samp_len = stream.get_audio_samples(chunk_samples)
+        samples.append(samp)
+        sample_lens.append(samp_len)
         states.append(stream.states)
         processed_lens.append(stream.done_frames)
 
-    feature_lens = torch.tensor(feature_lens, device=model.device)
-    features = pad_sequence(features, batch_first=True, padding_value=LOG_EPS)
+    sample_lens = torch.tensor(sample_lens, device=model.device)
+    samples = pad_sequence(samples, batch_first=True, padding_value=LOG_EPS).to(model.device)
 
+    states = stack_states(states)
+
+    features, feature_lens = model.forward_features(samples, sample_lens)
+    features = features.transpose(1, 2)
+    features = model.layer_norm(features)
     # Make sure the length after encoder_embed is at least 1.
     # The encoder_embed subsample features (T - 7) // 2
     # The ConvNeXt module needs (7 - 1) // 2 = 3 frames of right padding after subsampling
@@ -473,9 +481,7 @@ def decode_one_chunk(
             mode="constant",
             value=LOG_EPS,
         )
-
-    states = stack_states(states)
-
+    
     encoder_out, encoder_out_lens, new_states = streaming_forward(
         features=features,
         feature_lens=feature_lens,

@@ -218,6 +218,20 @@ def add_model_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
+        "--chunk-sec",
+        type=float,
+        default="0.08",
+        help=""
+    )
+
+    parser.add_argument(
+        "--sample-rate",
+        type=int,
+        default=16000,
+        help=""
+    )
+
+    parser.add_argument(
         "--left-context-frames",
         type=str,
         default="64,128,256,-1",
@@ -950,7 +964,7 @@ def train_one_epoch(
         batch_size = len(batch["supervisions"]["text"])
 
         try:
-            with torch.cuda.amp.autocast(enabled=params.use_fp16):
+            with torch.amp.autocast(enabled=params.use_fp16, device_type='cuda'):
                 loss, loss_info = compute_loss(
                     params=params,
                     model=model,
@@ -1356,7 +1370,7 @@ def scan_pessimistic_batches_for_oom(
     for criterion, cuts in batches.items():
         batch = train_dl.dataset[cuts]
         try:
-            with torch.cuda.amp.autocast(enabled=params.use_fp16):
+            with torch.amp.autocast(enabled=params.use_fp16, device_type='cuda'):
                 loss, _ = compute_loss(
                     params=params,
                     model=model,

@@ -148,7 +148,7 @@ class ConvFeatureExtractionModel(nn.Module):
         x_lens = x_lens.to(torch.long)
         # BxT -> BxCxT
         x = x.unsqueeze(1)
-
+        
         for conv_block in self.conv_layers:
             conv = conv_block[0]
             x = conv_block(x)
@@ -159,7 +159,7 @@ class ConvFeatureExtractionModel(nn.Module):
                 padding=conv.padding[0],
                 dilation=conv.dilation[0],
             )
-
+        
         return x, x_lens
 
 class AsrModel(nn.Module):
@@ -567,7 +567,7 @@ class AsrModel(nn.Module):
         x, x_lens = self.forward_features(x, x_lens)
         x = x.transpose(1, 2)
         x = self.layer_norm(x)
-
+        
         if use_cr_ctc:
             assert self.use_ctc
             if use_spec_aug:

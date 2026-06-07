@@ -4,8 +4,10 @@ python \
     --epoch 5 \
     --avg 3 \
     --causal 1 \
-    --chunk-size 32 \
+    --chunk-size 16 \
     --left-context-frames 256 \
+    --chunk-sec 0.5 \
+    --sample-rate 16000 \
     --exp-dir ./exp \
     --bpe-model /home/m-wu/proj/ASR/dataprocessing/bpe/bpe.model \
     --lang /home/m-wu/proj/ASR/dataprocessing/bpe \

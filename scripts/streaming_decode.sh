@@ -1,16 +1,17 @@
 python \
     streaming_decode.py \
     --use-pretrained false \
-    --epoch 5 \
-    --avg 3 \
+    --epoch 18 \
+    --avg 1 \
     --causal 1 \
-    --chunk-size 16 \
+    --chunk-size 32 \
     --left-context-frames 256 \
-    --chunk-sec 0.5 \
+    --chunk-sec 1 \
     --sample-rate 16000 \
     --exp-dir ./exp \
     --bpe-model /home/m-wu/proj/ASR/dataprocessing/bpe/bpe.model \
     --lang /home/m-wu/proj/ASR/dataprocessing/bpe \
+    --lang-type bpe \
     --manifest-dir dataprocessing/cuts \
     --decoding-method greedy_search \
     --num-encoder-layers 2,2,3,4,3,2 \

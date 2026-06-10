@@ -105,8 +105,8 @@ from typing import Dict, List, Optional, Tuple
 import k2
 import torch
 import torch.nn as nn
-from data.asr_datamodule import ReazonSpeechAsrDataModule
-from .beam_search import (
+from data.asr_datamodule import ReazonSpeechAsrDataModule, AsrDataModule
+from model.beam_search import (
     beam_search,
     fast_beam_search_nbest,
     fast_beam_search_nbest_LG,
@@ -439,25 +439,40 @@ def decode_one_batch(
     """
     device = next(model.parameters()).device
     feature = batch["inputs"]
-    assert feature.ndim == 3
+    # at entry, feature is (N, T, C)
+    if params.use_raw_wav:
+        assert feature.ndim == 2
+    else:
+        assert feature.ndim == 3
 
     feature = feature.to(device)
     # at entry, feature is (N, T, C)
 
     supervisions = batch["supervisions"]
-    feature_lens = supervisions["num_frames"].to(device)
 
-    if params.causal:
-        # this seems to cause insertions at the end of the utterance if used with zipformer.
-        pad_len = 30
-        feature_lens += pad_len
-        feature = torch.nn.functional.pad(
-            feature,
-            pad=(0, 0, 0, pad_len),
-            value=LOG_EPS,
-        )
+    if params.use_raw_wav:
+        feature_lens = supervisions["num_samples"].to(device)
+    else:
+        feature_lens = supervisions["num_frames"].to(device)
 
-    encoder_out, encoder_out_lens = model.forward_encoder(feature, feature_lens)
+    if params.use_raw_wav:
+        features, feature_lens = model.forward_features(feature, feature_lens)
+        features = features.transpose(1, 2)
+        features = model.layer_norm(features)
+    else:
+        features = feature
+
+        if params.causal:
+            # this seems to cause insertions at the end of the utterance if used with zipformer.
+            pad_len = 30
+            feature_lens += pad_len
+            features = torch.nn.functional.pad(
+                features,
+                pad=(0, 0, 0, pad_len),
+                value=LOG_EPS,
+            )
+    
+    encoder_out, encoder_out_lens = model.forward_encoder(features, feature_lens)
 
     hyps = []
 
@@ -643,6 +658,57 @@ def decode_one_batch(
     else:
         return {f"beam_size_{params.beam_size}": hyps}
 
+def debug_batch_outputs(batch, hyps_dict, sp, max_items=5):
+    import soundfile as sf
+    supervisions = batch["supervisions"]
+    texts = supervisions["text"]
+    cuts = supervisions["cut"]
+
+    for name, hyps in hyps_dict.items():
+        print(f"\n========== decoding result: {name} ==========")
+
+        for i, (cut, ref_text, hyp_words) in enumerate(zip(cuts, texts, hyps)):
+            if i >= max_items:
+                break
+
+            hyp_text = "".join(hyp_words)
+            ref_words = sp.text2word(ref_text)
+            ref_text_from_words = "".join(ref_words)
+
+            print("\n------------------------------")
+            print(f"index: {i}")
+            print(f"cut_id: {cut.id}")
+
+            print(f"REF raw text: {ref_text}")
+            print(f"REF words: {ref_words}")
+            print(f"REF joined: {ref_text_from_words}")
+            print(f"HYP words: {hyp_words}")
+            print(f"HYP joined: {hyp_text}")
+
+            print(f"cut start: {getattr(cut, 'start', None)}")
+            print(f"cut duration: {getattr(cut, 'duration', None)}")
+            print(f"cut end: {getattr(cut, 'end', None)}")
+
+            try:
+                print(f"audio path: {cut.recording.sources[0].source}")
+                # sf.write(f'{i}.wav', batch['inputs'].numpy()[0], samplerate=16000)
+            except Exception as e:
+                print(f"audio path: <failed to get> {e}")
+
+            try:
+                print("supervisions:")
+                for sup in cut.supervisions:
+                    print(
+                        {
+                            "id": sup.id,
+                            "text": sup.text,
+                            "start": sup.start,
+                            "duration": sup.duration,
+                            "end": sup.end,
+                        }
+                    )
+            except Exception as e:
+                print(f"supervisions: <failed to get> {e}")
 
 def decode_dataset(
     dl: torch.utils.data.DataLoader,
@@ -691,12 +757,12 @@ def decode_dataset(
         log_interval = 50
     else:
         log_interval = 20
-
+    
     results = defaultdict(list)
     for batch_idx, batch in enumerate(dl):
         texts = batch["supervisions"]["text"]
         cut_ids = [cut.id for cut in batch["supervisions"]["cut"]]
-
+        
         hyps_dict = decode_one_batch(
             params=params,
             model=model,
@@ -709,6 +775,10 @@ def decode_dataset(
             ngram_lm=ngram_lm,
             ngram_lm_scale=ngram_lm_scale,
         )
+
+        if batch_idx < 3:
+            debug_batch_outputs(batch, hyps_dict, sp, max_items=5)
+            breakpoint()
 
         for name, hyps in hyps_dict.items():
             this_batch = []
@@ -775,7 +845,7 @@ def save_results(
 @torch.no_grad()
 def main():
     parser = get_parser()
-    ReazonSpeechAsrDataModule.add_arguments(parser)
+    AsrDataModule.add_arguments(parser)
     Tokenizer.add_arguments(parser)
     args = parser.parse_args()
     args.exp_dir = Path(args.exp_dir)
@@ -860,7 +930,7 @@ def main():
         device = torch.device("cuda", 0)
 
     logging.info(f"Device: {device}")
-
+    
     sp = Tokenizer.load(params.lang, params.lang_type)
 
     # <blk> and <unk> are defined in local/prepare_lang_char.py
@@ -871,6 +941,8 @@ def main():
     logging.info(params)
 
     logging.info("About to create model")
+    if not params.use_raw_wav:
+        params.feature_dim = 80
     model = get_model(params)
 
     if not params.use_averaged_model:
@@ -1035,9 +1107,12 @@ def main():
 
     # we need cut ids to display recognition results.
     args.return_cuts = True
-    reazonspeech_corpus = ReazonSpeechAsrDataModule(args)
+    if params.use_raw_wav:
+        reazonspeech_corpus = AsrDataModule(args)
+    else:
+        reazonspeech_corpus = ReazonSpeechAsrDataModule(args)
 
-    for subdir in ["valid"]:
+    for subdir in ["train"]:
         results_dict = decode_dataset(
             dl=reazonspeech_corpus.test_dataloaders(
                 getattr(reazonspeech_corpus, f"{subdir}_cuts")()
@@ -1052,6 +1127,7 @@ def main():
             ngram_lm=ngram_lm,
             ngram_lm_scale=ngram_lm_scale,
         )
+        
         tot_err = save_results(
             params=params,
             test_set_name=subdir,

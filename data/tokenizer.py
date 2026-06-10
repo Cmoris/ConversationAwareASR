@@ -37,8 +37,7 @@ class Tokenizer:
             assert (
                 lang_dir / "bpe.model"
             ).exists(), f"No BPE .model could be found in {lang_dir}."
-            tokenizer = spm.SentencePieceProcessor()
-            tokenizer.Load(str(lang_dir / "bpe.model"))
+            tokenizer = BPETokenizer(lang_dir)
         elif lang_type == "char":
             tokenizer = CharTokenizer(lang_dir, oov=oov)
         else:
@@ -167,6 +166,42 @@ class Tokenizer:
         raise RuntimeError("Unknown input type")
 
     split = Split
+
+
+class BPETokenizer(Tokenizer):
+    def __init__(self, lang_dir: Path):
+        assert (
+            lang_dir / "bpe.model"
+        ).exists(), f"No BPE .model could be found in {lang_dir}."
+
+        self.sp = spm.SentencePieceProcessor()
+        self.sp.Load(str(lang_dir / "bpe.model"))
+
+        self.text2word = lambda x: self.EncodeAsPieces(x)
+
+    def piece_to_id(self, piece: str) -> int:
+        return self.sp.PieceToId(piece)
+
+    def id_to_piece(self, id: int) -> str:
+        return self.sp.IdToPiece(id)
+
+    def get_piece_size(self) -> int:
+        return self.sp.GetPieceSize()
+
+    def EncodeAsIdsBatch(self, input: List[str]) -> List[List[int]]:
+        return [self.sp.EncodeAsIds(text) for text in input]
+
+    def EncodeAsPiecesBatch(self, input: List[str]) -> List[List[str]]:
+        return [self.sp.EncodeAsPieces(text) for text in input]
+
+    def DecodeIdsBatch(self, input: List[List[int]]) -> List[str]:
+        return [self.sp.DecodeIds(ids) for ids in input]
+
+    def DecodePiecesBatch(self, input: List[List[str]]) -> List[str]:
+        return [self.sp.DecodePieces(pieces) for pieces in input]
+
+    def SplitBatch(self, input: List[str]) -> List[List[str]]:
+        return self.EncodeAsPiecesBatch(input)
 
 
 class CharTokenizer(Tokenizer):

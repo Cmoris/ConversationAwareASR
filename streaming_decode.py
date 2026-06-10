@@ -772,7 +772,7 @@ def main():
 
     logging.info("About to create model")
     model = get_model(params)
-
+    breakpoint()
     if not params.use_averaged_model:
         if params.iter > 0:
             filenames = find_checkpoints(params.exp_dir, iteration=-params.iter)[

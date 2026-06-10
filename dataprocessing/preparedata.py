@@ -84,8 +84,8 @@ def save_cuts(wav_files, starts, ends, texts, output_dir):
 if __name__ == "__main__":
     trs_dir = "/ctd/SpeechData/Trainset/Japanese/E2E/ACP/16k/trs/20250515/original"
     trs_file = "/ctd/SpeechData/Trainset/Japanese/E2E/ACP/16k/trs/20250515/original/ACP_20250515_01.trs"
-    output_dir = "/home/m-wu/proj/ASR/dataprocessing/cuts"
-    data = load_trs_for_asr(trs_file)
+    output_dir = "/home/m-wu/proj/ASR/dataprocessing/test_cuts"
+    data = load_trs_for_asr(trs_file)[:100]
     wav_files = [d["audio_path"] for d in data]
     texts = [d["text"] for d in data]
     starts = [d["start"] for d in data]

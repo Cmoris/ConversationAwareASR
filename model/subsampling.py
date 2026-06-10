@@ -405,3 +405,31 @@ class Conv2dSubsampling(nn.Module):
         )
 
         return cached_embed_left_pad
+
+class LinearSubsampling(nn.Module):
+    def __init__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            dropout: FloatLike = 0.1,
+        ):
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        self.post_extract_proj = (
+            nn.Linear(in_channels, out_channels)
+            if in_channels != out_channels
+            else None
+        )
+
+        self.dropout = Dropout3(dropout, shared_dim=1)
+
+    def forward(self, x, x_lens):
+        if self.post_extract_proj is not None:
+            x = self.post_extract_proj(x)
+        
+        x = self.dropout(x)
+
+        return x, x_lens

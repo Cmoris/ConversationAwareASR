@@ -1,19 +1,22 @@
-export CUDA_VISIBLE_DEVICES="0,1,2,3"
+export CUDA_VISIBLE_DEVICES="0,1"
 
 python ./train.py \
-  --world-size 4 \
+  --world-size 1 \
   --num-epochs 100 \
   --base-lr 1e-4 \
   --start-epoch 1 \
   --use-fp16 1 \
-  --use-pretrained false \
-  --exp-dir ./exp \
-  --causal 1 \
-  --max-duration 250  \
-  --enable-spec-aug false \
+  --lang-type bpe \
   --lang dataprocessing/bpe \
-  --manifest-dir dataprocessing/cuts \
   --bpe-model dataprocessing/bpe/bpe.model \
+  --exp-dir ./exp_wav_adamw \
+  --manifest-dir dataprocessing/cuts \
+  --use-raw-wav true \
+  --use-pretrained false \
+  --causal 1 \
+  --max-duration 500 \
+  --enable-spec-aug false \
+  --encoder-embed-type linear \
   --num-encoder-layers 2,2,3,4,3,2 \
   --downsampling-factor 1,2,4,8,4,2 \
   --feedforward-dim 512,768,1024,1536,1024,768 \

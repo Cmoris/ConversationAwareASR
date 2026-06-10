@@ -19,7 +19,7 @@ inputs = feature_extractor(
     return_tensors="pt",
     sampling_rate=sr,
 )
-inputs['padding_mask'] = (inputs['input_values'] != 0)
+# inputs['padding_mask'] = (inputs['input_values'] != 0)
 
 print(audio.shape)
 print(inputs['input_values'].size())

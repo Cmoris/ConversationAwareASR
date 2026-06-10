@@ -28,7 +28,7 @@ from .scaling import ScaledLinear
 from utils.utils import add_sos, make_pad_mask, time_warp, torch_autocast
 
 
-class AsrModel(nn.Module):
+class AsrModelFbank(nn.Module):
     def __init__(
         self,
         encoder_embed: nn.Module,
@@ -420,7 +420,7 @@ class AsrModel(nn.Module):
 
         # Compute encoder outputs
         encoder_out, encoder_out_lens = self.forward_encoder(x, x_lens)
-
+        
         row_splits = y.shape.row_splits(1)
         y_lens = row_splits[1:] - row_splits[:-1]
 

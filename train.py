@@ -42,6 +42,9 @@ import model.optim
 import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
+from torch.optim import AdamW
+
+
 from data.asr_datamodule import ReazonSpeechAsrDataModule, AsrDataModule
 from model.decoder import Decoder
 from model.joiner import Joiner
@@ -50,18 +53,16 @@ from lhotse.cut import Cut
 from lhotse.dataset.sampling.base import CutSampler
 from lhotse.utils import fix_random_seed
 from model.dual_model import AsrModel
+from model.model import AsrModelFbank
 from model.optim import Eden, ScaledAdam
 from model.scaling import ScheduledFloat
-from model.subsampling import Conv2dSubsampling
+from model.subsampling import Conv2dSubsampling, LinearSubsampling
 from data.tokenizer import Tokenizer
 from torch import Tensor
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from model.zipformer import Zipformer2
-
-import transformers
-from transformers import AutoFeatureExtractor, AutoModel
 
 from utils import diagnostics
 from utils.checkpoint import load_checkpoint, remove_checkpoints
@@ -259,6 +260,20 @@ def add_model_arguments(parser: argparse.ArgumentParser):
         type=str2bool,
         default=True,
         help="If True, use Pretrained Model from huggingface.",
+    )
+
+    parser.add_argument(
+        "--encoder-embed-type",
+        type=str,
+        choices=["linear", "conv"],
+        help="Choose different subsampling type after feature extractor",
+    )
+
+    parser.add_argument(
+        "--use-raw-wav",
+        type=str2bool,
+        default=True,
+        help="If True, use wav samples as input.",
     )
 
 
@@ -557,11 +572,21 @@ def get_encoder_embed(params: AttributeDict) -> nn.Module:
     # In the normal configuration, we will downsample once more at the end
     # by a factor of 2, and most of the encoder stacks will run at a lower
     # sampling rate.
-    encoder_embed = Conv2dSubsampling(
-        in_channels=params.feature_dim,
-        out_channels=_to_int_tuple(params.encoder_dim)[0],
-        dropout=ScheduledFloat((0.0, 0.3), (20000.0, 0.1)),
-    )
+    if 'linear' in params.encoder_embed_type and params.use_raw_wav:
+        encoder_embed = LinearSubsampling(
+            in_channels=params.feature_dim,
+            out_channels=_to_int_tuple(params.encoder_dim)[0],
+            dropout=ScheduledFloat((0.0, 0.3), (20000.0, 0.1)),
+        )
+    elif 'conv' in params.encoder_embed_type:
+        encoder_embed = Conv2dSubsampling(
+            in_channels=params.feature_dim,
+            out_channels=_to_int_tuple(params.encoder_dim)[0],
+            dropout=ScheduledFloat((0.0, 0.3), (20000.0, 0.1)),
+        )
+    else:
+        raise ValueError
+
     return encoder_embed
 
 
@@ -627,22 +652,34 @@ def get_model(params: AttributeDict) -> nn.Module:
     else:
         decoder = None
         joiner = None
-
-    model = AsrModel(
-        encoder_embed=encoder_embed,
-        encoder=encoder,
-        decoder=decoder,
-        joiner=joiner,
-        feature_dim=params.feature_dim,
-        encoder_dim=max(_to_int_tuple(params.encoder_dim)),
-        decoder_dim=params.decoder_dim,
-        vocab_size=params.vocab_size,
-        use_transducer=params.use_transducer,
-        use_ctc=params.use_ctc,
-        use_pretrained=params.use_pretrained,
-        feature_grad_mult=params.feature_grad_mult,
-        feature_enc_layers=params.feature_enc_layers
-    )
+    if params.use_raw_wav:
+        model = AsrModel(
+            encoder_embed=encoder_embed,
+            encoder=encoder,
+            decoder=decoder,
+            joiner=joiner,
+            feature_dim=params.feature_dim,
+            encoder_dim=max(_to_int_tuple(params.encoder_dim)),
+            decoder_dim=params.decoder_dim,
+            vocab_size=params.vocab_size,
+            use_transducer=params.use_transducer,
+            use_ctc=params.use_ctc,
+            use_pretrained=params.use_pretrained,
+            feature_grad_mult=params.feature_grad_mult,
+            feature_enc_layers=params.feature_enc_layers
+        )
+    else:
+        model = AsrModelFbank(
+            encoder_embed=encoder_embed,
+            encoder=encoder,
+            decoder=decoder,
+            joiner=joiner,
+            encoder_dim=max(_to_int_tuple(params.encoder_dim)),
+            decoder_dim=params.decoder_dim,
+            vocab_size=params.vocab_size,
+            use_transducer=params.use_transducer,
+            use_ctc=params.use_ctc,
+        )
     return model
 
 
@@ -790,12 +827,19 @@ def compute_loss(
     device = model.device if isinstance(model, DDP) else next(model.parameters()).device
     feature = batch["inputs"]
     # at entry, feature is (N, T, C)
-    
-    assert feature.ndim == 2
+    if params.use_raw_wav:
+        assert feature.ndim == 2
+    else:
+        assert feature.ndim == 3
+
     feature = feature.to(device)
     
     supervisions = batch["supervisions"]
-    feature_lens = supervisions["num_samples"].to(device)
+
+    if params.use_raw_wav:
+        feature_lens = supervisions["num_samples"].to(device)
+    else:
+        feature_lens = supervisions["num_frames"].to(device)
 
     batch_idx_train = params.batch_idx_train
     warm_step = params.warm_step
@@ -935,8 +979,8 @@ def train_one_epoch(
     """
     model.train()
 
-    m = model.module if isinstance(model, DDP) else model
     if params.use_pretrained:
+        m = model.module if isinstance(model, DDP) else model
         m.encoder.eval()
 
     tot_loss = MetricsTracker()
@@ -1139,6 +1183,8 @@ def run(rank, world_size, args):
     logging.info(params)
 
     logging.info("About to create model")
+    if not params.use_raw_wav:
+        params.feature_dim = 80
     model = get_model(params)
 
     num_param = sum([p.numel() for p in model.parameters()])
@@ -1160,10 +1206,13 @@ def run(rank, world_size, args):
         logging.info("Using DDP")
         model = DDP(model, device_ids=[rank], find_unused_parameters=True)
 
-    optimizer = ScaledAdam(
-        get_parameter_groups_with_lrs(model, lr=params.base_lr, include_names=True),
-        lr=params.base_lr,  # should have no effect
-        clipping_scale=2.0,
+    # optimizer = ScaledAdam(
+    #     get_parameter_groups_with_lrs(model, lr=params.base_lr, include_names=True),
+    #     lr=params.base_lr,  # should have no effect
+    #     clipping_scale=2.0,
+    # )
+    optimizer = AdamW(
+        get_parameter_groups_with_lrs(model, lr=params.base_lr, include_names=False),
     )
 
     scheduler = Eden(optimizer, params.lr_batches, params.lr_epochs)
@@ -1225,9 +1274,11 @@ def run(rank, world_size, args):
             return False
 
         return True
+    if params.use_raw_wav:
+        reazonspeech_corpus = AsrDataModule(args)
+    else:
+        reazonspeech_corpus = ReazonSpeechAsrDataModule(args)
 
-    # reazonspeech_corpus = ReazonSpeechAsrDataModule(args)
-    reazonspeech_corpus = AsrDataModule(args)
     train_cuts = reazonspeech_corpus.train_cuts()
 
     train_cuts = train_cuts.filter(remove_short_and_long_utt)
@@ -1270,7 +1321,7 @@ def run(rank, world_size, args):
             params=params,
         )
 
-    scaler = GradScaler(enabled=params.use_fp16, init_scale=1.0)
+    scaler = GradScaler(enabled=params.use_fp16, init_scale=1.0, device='cuda')
     if checkpoints and "grad_scaler" in checkpoints:
         logging.info("Loading grad scaler state dict")
         scaler.load_state_dict(checkpoints["grad_scaler"])
@@ -1398,8 +1449,9 @@ def scan_pessimistic_batches_for_oom(
 
 def main():
     parser = get_parser()
-    ReazonSpeechAsrDataModule.add_arguments(parser)
     Tokenizer.add_arguments(parser)
+    AsrDataModule.add_arguments(parser)
+    # ReazonSpeechAsrDataModule.add_arguments(parser)
     args = parser.parse_args()
     args.exp_dir = Path(args.exp_dir)
 

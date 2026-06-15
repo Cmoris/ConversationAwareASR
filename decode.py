@@ -1112,7 +1112,7 @@ def main():
     else:
         reazonspeech_corpus = ReazonSpeechAsrDataModule(args)
 
-    for subdir in ["train"]:
+    for subdir in ["test"]:
         results_dict = decode_dataset(
             dl=reazonspeech_corpus.test_dataloaders(
                 getattr(reazonspeech_corpus, f"{subdir}_cuts")()

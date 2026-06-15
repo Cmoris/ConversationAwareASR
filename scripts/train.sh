@@ -4,7 +4,7 @@ python ./train.py \
   --world-size 1 \
   --num-epochs 100 \
   --base-lr 1e-4 \
-  --start-epoch 1 \
+  --start-epoch 100 \
   --use-fp16 1 \
   --lang-type bpe \
   --lang dataprocessing/bpe \

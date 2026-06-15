@@ -1,10 +1,10 @@
-export CUDA_VISIBLE_DEVICES="2"
+export CUDA_VISIBLE_DEVICES="0"
 
 python \
     decode.py \
-    --epoch 26 \
-    --use-averaged-model false \
-    --avg 1 \
+    --epoch 100 \
+    --use-averaged-model true \
+    --avg 20 \
     --causal 1 \
     --chunk-size 32 \
     --left-context-frames 256 \
@@ -15,7 +15,10 @@ python \
     --bpe-model /home/m-wu/proj/ASR/dataprocessing/bpe/bpe.model \
     --manifest-dir dataprocessing/cuts \
     --max-sym-per-frame 10 \
-    --decoding-method greedy_search \
+    --decoding-method fast_beam_search_nbest_LG \
+    --beam 20.0 \
+    --max-contexts 8 \
+    --max-states 64 \
     --use-pretrained false \
     --use-raw-wav false \
     --encoder-embed-type conv \

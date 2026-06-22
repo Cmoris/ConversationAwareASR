@@ -52,7 +52,7 @@ from lhotse import load_manifest
 from lhotse.cut import Cut
 from lhotse.dataset.sampling.base import CutSampler
 from lhotse.utils import fix_random_seed
-from model.dual_model import AsrModel
+from model.wav_model import AsrModel
 from model.model import AsrModelFbank
 from model.optim import Eden, ScaledAdam
 from model.scaling import ScheduledFloat

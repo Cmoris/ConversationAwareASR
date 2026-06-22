@@ -6,6 +6,7 @@ from lhotse import SupervisionSegment
 
 import re
 from pathlib import Path
+from tqdm import tqdm
 
 from sklearn.model_selection import train_test_split
 
@@ -47,7 +48,7 @@ def save_cuts(wav_files, starts, ends, texts, output_dir):
     recordings = []
     supervisions = []
 
-    for wav, start, end, text in zip(wav_files, starts, ends, texts):
+    for wav, start, end, text in tqdm(zip(wav_files, starts, ends, texts)):
         wav = Path("/ctd/SpeechData/Trainset/Japanese") / wav
         recording = Recording.from_file(str(wav))
         
@@ -82,12 +83,17 @@ def save_cuts(wav_files, starts, ends, texts, output_dir):
     SupervisionSet.from_segments(dev_sup).to_file(output_dir / "supervisions_dev.jsonl.gz")
 
 if __name__ == "__main__":
-    trs_dir = "/ctd/SpeechData/Trainset/Japanese/E2E/ACP/16k/trs/20250515/original"
-    trs_file = "/ctd/SpeechData/Trainset/Japanese/E2E/ACP/16k/trs/20250515/original/ACP_20250515_01.trs"
-    output_dir = "/home/m-wu/proj/ASR/dataprocessing/test_cuts"
-    data = load_trs_for_asr(trs_file)[:100]
-    wav_files = [d["audio_path"] for d in data]
-    texts = [d["text"] for d in data]
-    starts = [d["start"] for d in data]
-    ends = [d["end"] for d in data]
+    trs_dir = "/ctd/Works/c-zheng/End2End/Chinese_general_AddNoise_RoomSimu/00trs_ok_202502_small"
+    output_dir = "/home/m-wu/proj/ASR/dataprocessing/cuts_chinese"
+    trs_files = [str(x) for x in Path(trs_dir).glob("*.trs")]
+
+    datas = []
+    for trs_file in trs_files:
+        data = load_trs_for_asr(trs_file)
+        datas.extend(data)
+
+    wav_files = [d["audio_path"] for d in datas]
+    texts = [d["text"] for d in datas]
+    starts = [d["start"] for d in datas]
+    ends = [d["end"] for d in datas]
     save_cuts(wav_files, starts, ends, texts, output_dir)

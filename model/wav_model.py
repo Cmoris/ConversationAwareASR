@@ -223,7 +223,6 @@ class AsrModel(nn.Module):
         assert isinstance(encoder, EncoderInterface), type(encoder)
         self.feature_grad_mult = feature_grad_mult
         self.feature_enc_layers = feature_enc_layers
-        self.embed = feature_enc_layers[-1][0]
 
         self.feature_extractor = ConvFeatureExtractionModel(
             conv_layers=feature_enc_layers,

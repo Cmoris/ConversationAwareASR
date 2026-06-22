@@ -153,8 +153,159 @@ class DialogueStateClassifier(nn.Module):
         pooled = pooled / encoder_out_lens.clamp(min=1).unsqueeze(-1).to(encoder_out.dtype)
         return self.classifier(pooled)
 
+class Fp32GroupNorm(nn.GroupNorm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-class DualAsrModelFbank(nn.Module):
+    def forward(self, input):
+        output = F.group_norm(
+            input.float(),
+            self.num_groups,
+            self.weight.float() if self.weight is not None else None,
+            self.bias.float() if self.bias is not None else None,
+            self.eps,
+        )
+        return output.type_as(input)
+    
+class Fp32LayerNorm(nn.LayerNorm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, input):
+        output = F.layer_norm(
+            input.float(),
+            self.normalized_shape,
+            self.weight.float() if self.weight is not None else None,
+            self.bias.float() if self.bias is not None else None,
+            self.eps,
+        )
+        return output.type_as(input)
+    
+class TransposeLast(nn.Module):
+    def __init__(self, deconstruct_idx=None, tranpose_dim=-2):
+        super().__init__()
+        self.deconstruct_idx = deconstruct_idx
+        self.tranpose_dim = tranpose_dim
+
+    def forward(self, x):
+        if self.deconstruct_idx is not None:
+            x = x[self.deconstruct_idx]
+        return x.transpose(self.tranpose_dim, -1)
+    
+class GradMultiply(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, scale):
+        ctx.scale = scale
+        res = x.new(x)
+        return res
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * ctx.scale, None
+
+class ConvFeatureExtractionModel(nn.Module):
+    def __init__(
+        self,
+        conv_layers: List[Tuple[int, int, int]],
+        dropout: float = 0.0,
+        mode: str = "default",
+        conv_bias: bool = False,
+    ):
+        super().__init__()
+
+        assert mode in {"default", "layer_norm"}
+
+        def block(
+            n_in,
+            n_out,
+            k,
+            stride,
+            is_layer_norm=False,
+            is_group_norm=False,
+            conv_bias=False,
+        ):
+            def make_conv():
+                conv = nn.Conv1d(n_in, n_out, k, stride=stride, bias=conv_bias)
+                nn.init.kaiming_normal_(conv.weight)
+                return conv
+
+            assert (is_layer_norm and is_group_norm) == False, (
+                "layer norm and group norm are exclusive"
+            )
+
+            if is_layer_norm:
+                return nn.Sequential(
+                    make_conv(),
+                    nn.Dropout(p=dropout),
+                    nn.Sequential(
+                        TransposeLast(),
+                        Fp32LayerNorm(dim, elementwise_affine=True),
+                        TransposeLast(),
+                    ),
+                    nn.GELU(),
+                )
+            elif is_group_norm:
+                return nn.Sequential(
+                    make_conv(),
+                    nn.Dropout(p=dropout),
+                    Fp32GroupNorm(dim, dim, affine=True),
+                    nn.GELU(),
+                )
+            else:
+                return nn.Sequential(make_conv(), nn.Dropout(p=dropout), nn.GELU())
+
+        in_d = 1
+        self.conv_layers = nn.ModuleList()
+        for i, cl in enumerate(conv_layers):
+            assert len(cl) == 3, "invalid conv definition: " + str(cl)
+            (dim, k, stride) = cl
+
+            self.conv_layers.append(
+                block(
+                    in_d,
+                    dim,
+                    k,
+                    stride,
+                    is_layer_norm=mode == "layer_norm",
+                    is_group_norm=mode == "default" and i == 0,
+                    conv_bias=conv_bias,
+                )
+            )
+            in_d = dim
+
+    @staticmethod
+    def _conv_out_length(
+        input_length: torch.Tensor,
+        kernel_size: int,
+        stride: int,
+        padding: int = 0,
+        dilation: int = 1,
+    ) -> torch.Tensor:
+        return torch.div(
+            input_length + 2 * padding - dilation * (kernel_size - 1) - 1,
+            stride,
+            rounding_mode="floor",
+        ) + 1
+
+    def forward(self, x, x_lens):
+        x_lens = x_lens.to(torch.long)
+        # BxT -> BxCxT
+        x = x.unsqueeze(1)
+        
+        for conv_block in self.conv_layers:
+            conv = conv_block[0]
+            x = conv_block(x)
+            x_lens = self._conv_out_length(
+                x_lens,
+                kernel_size=conv.kernel_size[0],
+                stride=conv.stride[0],
+                padding=conv.padding[0],
+                dilation=conv.dilation[0],
+            )
+        
+        return x, x_lens
+
+class DualAsrModelWav(nn.Module):
     def __init__(
         self,
         encoder_embed: nn.Module,
@@ -162,6 +313,7 @@ class DualAsrModelFbank(nn.Module):
         decoder: Optional[nn.Module] = None,
         joiner: Optional[nn.Module] = None,
         attention_decoder: Optional[nn.Module] = None,
+        feature_dim: int = 512,
         encoder_dim: int = 384,
         decoder_dim: int = 512,
         vocab_size: int = 500,
@@ -174,6 +326,8 @@ class DualAsrModelFbank(nn.Module):
         selector_num_heads: int = 4,
         selector_dropout: float = 0.1,
         use_selected_encoder_for_asr: bool = True,
+        feature_grad_mult: float = 0.1,
+        feature_enc_layers: List[Tuple[int, int, int]] = None
     ):
         """A joint CTC & Transducer ASR model.
 
@@ -215,6 +369,16 @@ class DualAsrModelFbank(nn.Module):
         ), f"At least one of them should be True, but got use_transducer={use_transducer}, use_ctc={use_ctc}"
 
         assert isinstance(encoder, EncoderInterface), type(encoder)
+
+        self.feature_grad_mult = feature_grad_mult
+        self.feature_enc_layers = feature_enc_layers
+
+        self.feature_extractor = ConvFeatureExtractionModel(
+            conv_layers=feature_enc_layers,
+            dropout=0.0,
+        )
+
+        self.layer_norm = nn.LayerNorm(feature_dim)
 
         self.encoder_embed = encoder_embed
         self.encoder = encoder
@@ -285,6 +449,16 @@ class DualAsrModelFbank(nn.Module):
                 num_states=num_dialogue_states,
                 dropout=selector_dropout,
             )
+
+    def forward_features(self, source: torch.Tensor, x_lens: torch.Tensor) -> torch.Tensor:
+        if self.feature_grad_mult > 0:
+            features, feature_lens = self.feature_extractor(source, x_lens)
+            if self.feature_grad_mult != 1.0:
+                features = GradMultiply.apply(features, self.feature_grad_mult)
+        else:
+            with torch.no_grad():
+                features, feature_lens = self.feature_extractor(source, x_lens)
+        return features, feature_lens
 
     def forward_encoder(
         self, x: torch.Tensor, x_lens: torch.Tensor
@@ -513,13 +687,62 @@ class DualAsrModelFbank(nn.Module):
         dialogue_state_loss_scale: float = 1.0,
         return_dialogue_state_outputs: bool = False,
     ):
-        assert x.ndim == 3, x.shape
+        """
+        Args:
+          x:
+            A 3-D tensor of shape (N, T, C).
+          x_lens:
+            A 1-D tensor of shape (N,). It contains the number of frames in `x`
+            before padding.
+          y:
+            A ragged tensor with 2 axes [utt][label]. It contains labels of each
+            utterance.
+          prune_range:
+            The prune range for rnnt loss, it means how many symbols(context)
+            we are considering for each frame to compute the loss.
+          am_scale:
+            The scale to smooth the loss with am (output of encoder network)
+            part
+          lm_scale:
+            The scale to smooth the loss with lm (output of predictor network)
+            part
+          use_cr_ctc:
+            Whether use consistency-regularized CTC.
+          use_spec_aug:
+            Whether apply spec-augment manually, used only if use_cr_ctc is True.
+          spec_augment:
+            The SpecAugment instance that returns time masks,
+            used only if use_cr_ctc is True.
+          supervision_segments:
+            An int tensor of shape ``(S, 3)``. ``S`` is the number of
+            supervision segments that exist in ``features``.
+            Used only if use_cr_ctc is True.
+          time_warp_factor:
+            Parameter for the time warping; larger values mean more warping.
+            Set to ``None``, or less than ``1``, to disable.
+            Used only if use_cr_ctc is True.
+
+        Returns:
+          Return the transducer losses, CTC loss, AED loss,
+          and consistency-regularization loss in form of
+          (simple_loss, pruned_loss, ctc_loss, attention_decoder_loss, cr_loss)
+
+        Note:
+           Regarding am_scale & lm_scale, it will make the loss-function one of
+           the form:
+              lm_scale * lm_probs + am_scale * am_probs +
+              (1-lm_scale-am_scale) * combined_probs
+        """
+        assert x.ndim == 2, x.shape
         assert x_lens.ndim == 1, x_lens.shape
         assert y.num_axes == 2, y.num_axes
 
         assert x.size(0) == x_lens.size(0) == y.dim0, (x.shape, x_lens.shape, y.dim0)
 
         device = x.device
+        x, x_lens = self.forward_features(x, x_lens)
+        x = x.transpose(1, 2)
+        x = self.layer_norm(x)
 
         if use_cr_ctc:
             assert self.use_ctc
